@@ -11,27 +11,32 @@ import javax.imageio.ImageIO;
 
 public class ImageEncoder {
 
+	//////////////////////
+	// USER PREFERENCES //
+	//////////////////////
 	// Whether to write an image or read an image
-	static boolean WRITE = false;
+	static boolean WRITE =			false;
+	// Whether to generate an image or use one provided
+	static boolean GENERATE_IMAGE =	true;
 
-	// Paths for encoding
-	static String INPUT_MESSAGE = "C:\\Users\\Lucas\\Desktop\\message.txt";
-	static String OUTPUT_IMAGE = "C:\\Users\\Lucas\\Desktop\\encoded.png";
-
-	// Paths for decoding
-	static String INPUT_IMAGE = "C:\\Users\\Lucas\\Desktop\\encoded.png";
-
+	// Encoding
+	static String MESSAGE_PATH =			"C:\\Users\\Lucas\\Desktop\\message.txt";
+	static String IMAGE_TO_ENCODE =			"C:\\Users\\Lucas\\Desktop\\original.png";
+	static String OUTPUT_ENCODED_IMAGE =	"C:\\Users\\Lucas\\Desktop\\encoded.png";
+	// Decoding
+	static String IMAGE_TO_DECODE =			"C:\\Users\\Lucas\\Desktop\\encoded.png";
+	
 	// Encryption key ... "" = no encryption
 	static String KEY = "password";
-
 	// These weights determine the R,G,B cycles of the resulting image
 	static int[] weights = new int[] { 3, 6, 5 };
 
+	
 	public static void main(String[] args) {
 		if (WRITE) {
-			makeEncodedImageFile(INPUT_MESSAGE, OUTPUT_IMAGE, KEY);
+			makeEncodedImageFile(MESSAGE_PATH, IMAGE_TO_ENCODE, OUTPUT_ENCODED_IMAGE, KEY);
 		} else {
-			String message = readEncodedImageFile(INPUT_IMAGE, KEY);
+			String message = readEncodedImageFile(IMAGE_TO_DECODE, KEY);
 			System.out.println(message);
 		}
 	}
@@ -42,18 +47,26 @@ public class ImageEncoder {
 	 * Use string "" for no key.
 	 * 
 	 * @param messageInputPath the input path of the TXT message to encode
+	 * @param imageToEncode the path of the image that will be encoded (can be null if generating an image)
 	 * @param fileOutputPath the output path of the encoded PNG image to be saved
 	 * @param key the encryption key to use. Use "" or null if no key
 	 */
-	public static void makeEncodedImageFile(String messageInputPath, String fileOutputPath, String key) {
+	public static void makeEncodedImageFile(String messageInputPath, String imageToEncode, String fileOutputPath, String key) {
 		if (key == null){
 			key = "";
 		}
 		String string = readTextFile(messageInputPath);
 		int length = string.length();
-		int w = (int) (Math.sqrt(length)) + 1;
-		int h = (int) (Math.sqrt(length)) + 1;
-		BufferedImage image = makeEncodedImageFileWithMessage(w, h, string, key);
+
+		BufferedImage image = null;
+		if (GENERATE_IMAGE){
+			int w = (int) (Math.sqrt(length)) + 1;
+			int h = (int) (Math.sqrt(length)) + 1;
+			image = makePrettyPicture(w, h);
+		}else{
+			image = loadImage(imageToEncode);
+		}
+		encodeImage(image, string, key);
 		saveImage(image, fileOutputPath);
 	}
 
@@ -137,19 +150,13 @@ public class ImageEncoder {
 	}
 	
 	/**
-	 * Generates an image with radial colors and encodes a message into the pixels.
-	 * The characters of the message are stored in the last 3 bits of the red pixel,
-	 * the last 3 bits of the green pixel, and the last 2 bits of the blue pixel accordingly.
-	 * The message is encrypted with the key provided.
+	 * Generates an image with radial colors.
 	 * 
 	 * @param w the width of the image
 	 * @param h the height of the image
-	 * @param string the string to encode into the image
-	 * @param key the encryption key. Use "" if no encryption
 	 * @return a BufferedImage with the message encoded into it
 	 */
-	private static BufferedImage makeEncodedImageFileWithMessage(int w, int h, String string, String key) {
-		int length = string.length();
+	private static BufferedImage makePrettyPicture(int w, int h) {
 		BufferedImage image = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
 		int[] x = new int[3];
 		int[] y = new int[3];
@@ -157,20 +164,6 @@ public class ImageEncoder {
 			x[i] = (int) (Math.random() * w);
 			y[i] = (int) (Math.random() * h);
 		}
-
-		// Generate the encryption bytes using the KEY
-		Random encrypter = null;
-		byte[] encryptBytes = null;
-		boolean encrypt = false;
-		if (key != "") {
-			encrypter = new Random(KEY.hashCode());
-			encrypt = true;
-			encryptBytes = new byte[w * h];
-			encrypter.nextBytes(encryptBytes);
-		}
-
-		// Character counter
-		int k = 0;
 
 		// Loop through each pixel in the image
 		for (int i = 0; i < h; i++) {
@@ -190,38 +183,82 @@ public class ImageEncoder {
 					b = b > 255 ? 255 - (b - 255) : b;
 					b = b < 0 ? -b : b;
 				}
-
-				// Zero out the last few bits of the color values
-				r = (r & ~0b0111);
-				g = (g & ~0b0111);
-				b = (b & ~0b0011);
-
-				// Encode the character
-				char c = 0;
-
-				if (k < length) {
-					// Get the character to use
-					c = string.charAt(k);
-				}
-
-				// Encrypt the character
-				if (encrypt) {
-					c = (char) ((byte) (c) ^ (encryptBytes[k]));
-				}
-
-				// Put the char into the color values
-				r += (c & 0xE0) >> 5;
-				g += (c & 0x1C) >> 2;
-				b += (c & 0x03);
-
+				
 				// Put the color into the image
 				Color color = new Color(r, g, b);
 				int rgb = color.getRGB();
 				image.setRGB(j, i, rgb);
-				k++;
 			}
 		}
 		return image;
+	}
+	
+	/**
+	 * Encodes an image with a given message, encrypted with the key specified.
+	 * 
+	 * @param image the image that will contain the message
+	 * @param message the message to be encoded
+	 * @param key the encryption key
+	 */
+	private static void encodeImage(BufferedImage image, String message, String key){
+
+		int length = message.length();
+		int w = image.getWidth();
+		int h = image.getHeight();
+		
+		// Generate the encryption bytes using the KEY
+		Random encrypter = null;
+		byte[] encryptBytes = null;
+		boolean encrypt = false;
+		if (key != "") {
+			encrypter = new Random(KEY.hashCode());
+			encrypt = true;
+			encryptBytes = new byte[w * h];
+			encrypter.nextBytes(encryptBytes);
+		}
+		
+		// Character counter
+		int k = 0;
+
+		for (int i = 0; i < h; i++) {
+			for (int j = 0; j < w; j++) {
+
+				// Pull the important parts of the color data
+				int rgb = image.getRGB(j, i);
+				Color color = new Color(rgb);
+				int r = color.getRed();
+				int g = color.getGreen();
+				int b = color.getBlue();
+				// Zero out the last few bits of the color values
+				r = (r & ~0b0111);
+				g = (g & ~0b0111);
+				b = (b & ~0b0011);
+		
+				// Encode the character
+				char c = 0;
+		
+				if (k < length) {
+					// Get the character to use
+					c = message.charAt(k);
+				}
+		
+				// Encrypt the character
+				if (encrypt) {
+					c = (char) ((byte) (c) ^ (encryptBytes[k]));
+				}
+		
+				// Put the char into the color values
+				r += (c & 0xE0) >> 5;
+				g += (c & 0x1C) >> 2;
+				b += (c & 0x03);
+		
+				// Put the color into the image
+				color = new Color(r, g, b);
+				rgb = color.getRGB();
+				image.setRGB(j, i, rgb);
+				k++;
+			}
+		}
 	}
 
 	/**
